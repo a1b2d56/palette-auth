@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "palette-auth"
+version = "1.2.0"
+description = "Self-contained in-pixel authentication and tamper recovery for palette images"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "palette-auth contributors" }
+]
+keywords = [
+    "steganography",
+    "cryptography",
+    "image-authentication",
+    "tamper-detection",
+    "ed25519",
+    "forensics",
+    "neural-inpainting",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "pillow>=10.0",
+    "numpy>=1.24",
+    "cryptography>=42.0",
+]
+
+[project.optional-dependencies]
+ai = [
+    "torch>=2.0",
+    "scipy>=1.10",
+]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.4.0",
+    "mypy>=1.9.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/a1b2d56/palette-auth"
+Repository = "https://github.com/a1b2d56/palette-auth"
+Issues = "https://github.com/a1b2d56/palette-auth/issues"
+Documentation = "https://github.com/a1b2d56/palette-auth#readme"
+
+[project.scripts]
+palette-auth = "palette_auth.cli:main"
+
+[tool.setuptools.package-data]
+palette_auth = ["py.typed", "models/*.pt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
