@@ -26,3 +26,18 @@ def build_pair_map(palette_rgb: np.ndarray) -> dict[int, int]:
     dist2 = (diffs ** 2).sum(axis=2)
     np.fill_diagonal(dist2, np.iinfo(np.int64).max)
 
+    order = np.dstack(np.unravel_index(np.argsort(dist2, axis=None), dist2.shape))[0]
+    unpaired = set(range(n))
+    pair_of: dict[int, int] = {}
+    for a, b in order:
+        a, b = int(a), int(b)
+        if a in unpaired and b in unpaired:
+            pair_of[a] = b
+            pair_of[b] = a
+            unpaired.discard(a)
+            unpaired.discard(b)
+        if not unpaired:
+            break
+    return pair_of
+
+
