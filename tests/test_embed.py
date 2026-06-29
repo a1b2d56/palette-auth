@@ -16,3 +16,12 @@ def test_pair_map():
     assert pair_of[0] == 1
     assert pair_of[1] == 0
     assert pair_of[2] == 3
+    assert pair_of[3] == 2
+
+def test_canonical_indices_invariance():
+    pair_of = {0: 1, 1: 0, 2: 3, 3: 2}
+    arr1 = np.array([[0, 2], [1, 3]], dtype=np.uint8)
+    arr2 = np.array([[1, 3], [0, 2]], dtype=np.uint8)
+    
+    c1 = embed.canonical_indices(arr1, pair_of)
+    c2 = embed.canonical_indices(arr2, pair_of)

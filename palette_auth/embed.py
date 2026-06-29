@@ -41,3 +41,13 @@ def build_pair_map(palette_rgb: np.ndarray) -> dict[int, int]:
     return pair_of
 
 
+def canonical_indices(index_array: np.ndarray, pair_of: dict[int, int]) -> np.ndarray:
+    """Map every pixel's palette index to a value shared by both twins of
+    its pair. This is what gets hashed for authentication, so embedding a
+    bit (i.e. picking a twin) never looks like tampering."""
+    lut = np.arange(256, dtype=np.uint8)
+    for a, b in pair_of.items():
+        lut[a] = min(a, b)
+    return lut[index_array]
+
+
