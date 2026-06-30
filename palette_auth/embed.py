@@ -51,3 +51,32 @@ def canonical_indices(index_array: np.ndarray, pair_of: dict[int, int]) -> np.nd
     return lut[index_array]
 
 
+def _slot_positions(index_block: np.ndarray, pair_of: dict[int, int]) -> list[tuple[int, int]]:
+    if not pair_of:
+        return []
+    mask = np.isin(index_block, list(pair_of.keys()))
+    rows, cols = np.where(mask)
+    order = np.lexsort((cols, rows))  # deterministic raster order
+    return list(zip(rows[order].tolist(), cols[order].tolist()))
+
+
+def block_capacity(index_block: np.ndarray, pair_of: dict[int, int]) -> int:
+    return len(_slot_positions(index_block, pair_of))
+
+
+def bytes_to_bits(data: bytes) -> list[int]:
+    return [(byte >> shift) & 1 for byte in data for shift in range(7, -1, -1)]
+
+
+def bits_to_bytes(bits: list[int]) -> bytes:
+    if len(bits) % 8 != 0:
+        raise ValueError("bit length must be a multiple of 8")
+    out = bytearray()
+    for i in range(0, len(bits), 8):
+        byte = 0
+        for b in bits[i : i + 8]:
+            byte = (byte << 1) | b
+        out.append(byte)
+    return bytes(out)
+
+
