@@ -80,3 +80,34 @@ def bits_to_bytes(bits: list[int]) -> bytes:
     return bytes(out)
 
 
+def embed_bits_in_block(
+    index_block: np.ndarray, pair_of: dict[int, int], bits: list[int], start_slot: int = 0
+) -> None:
+    """Modifies index_block IN PLACE. It must be a numpy *view* into the
+    full image array (e.g. image_array[r0:r1, c0:c1]), not a copy, or the
+    change won't propagate back to the image being signed."""
+    positions = _slot_positions(index_block, pair_of)
+    end = start_slot + len(bits)
+    if end > len(positions):
+        raise ValueError(f"block capacity exceeded: need slots {start_slot}:{end}, have {len(positions)}")
+    for bit, (r, c) in zip(bits, positions[start_slot:end]):
+        idx = int(index_block[r, c])
+        partner = pair_of[idx]
+        lo, hi = (idx, partner) if idx < partner else (partner, idx)
+        index_block[r, c] = hi if bit else lo
+
+
+def extract_bits_from_block(
+    index_block: np.ndarray, pair_of: dict[int, int], n_bits: int, start_slot: int = 0
+) -> list[int]:
+    positions = _slot_positions(index_block, pair_of)
+    end = start_slot + n_bits
+    if end > len(positions):
+        raise ValueError(f"block capacity exceeded: need slots {start_slot}:{end}, have {len(positions)}")
+    bits = []
+    for r, c in positions[start_slot:end]:
+        idx = int(index_block[r, c])
+        partner = pair_of[idx]
+        lo, hi = (idx, partner) if idx < partner else (partner, idx)
+        bits.append(1 if idx == hi else 0)
+    return bits
