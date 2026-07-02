@@ -25,3 +25,23 @@ def test_canonical_indices_invariance():
     
     c1 = embed.canonical_indices(arr1, pair_of)
     c2 = embed.canonical_indices(arr2, pair_of)
+    
+    # In canonical space, 0 & 1 map to 0, 2 & 3 map to 2
+    assert np.array_equal(c1, np.array([[0, 2], [0, 2]], dtype=np.uint8))
+    assert np.array_equal(c2, np.array([[0, 2], [0, 2]], dtype=np.uint8))
+    assert np.array_equal(c1, c2)
+
+def test_bit_embedding_extraction_roundtrip():
+    pair_of = {0: 1, 1: 0}
+    block = np.zeros((8, 8), dtype=np.uint8)
+    
+    test_data = b"PASS123!"
+    bits = embed.bytes_to_bits(test_data)
+    assert len(bits) == 64
+    
+    embed.embed_bits_in_block(block, pair_of, bits)
+    extracted_bits = embed.extract_bits_from_block(block, pair_of, 64)
+    extracted_bytes = embed.bits_to_bytes(extracted_bits)
+    
+    assert extracted_bits == bits
+    assert extracted_bytes == test_data
