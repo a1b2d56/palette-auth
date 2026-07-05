@@ -11,3 +11,14 @@ def test_partition_blocks():
 def test_block_content_hash():
     arr = np.zeros((32, 32), dtype=np.uint8)
     b0 = blocks.BlockCoords(0, 0, 0, 32, 32)
+    b1 = blocks.BlockCoords(1, 0, 0, 32, 32)
+    
+    h0 = blocks.block_content_hash(arr, b0)
+    h1 = blocks.block_content_hash(arr, b1)
+    
+    assert len(h0) == blocks.BLOCK_HASH_SIZE
+    # Different block index must produce different hash (position-bound)
+    assert h0 != h1
+
+def test_load_balanced_spatial_mapping():
+    grid = blocks.partition_blocks(128, 128, 32) # 16 blocks

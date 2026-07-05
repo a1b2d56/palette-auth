@@ -55,3 +55,11 @@ def partition_blocks(height: int, width: int, block_size: int) -> list[BlockCoor
     return blocks
 
 
+def block_content_hash(content_array: np.ndarray, block: BlockCoords) -> bytes:
+    """Digest of one block's canonical (embedding-invariant) content, bound
+    to its position so two blocks can't be silently swapped with each other."""
+    patch = content_array[block.row0 : block.row1, block.col0 : block.col1]
+    payload = patch.tobytes() + block.index.to_bytes(4, "big")
+    return hashlib.sha256(payload).digest()[:BLOCK_HASH_SIZE]
+
+
