@@ -63,3 +63,28 @@ def save_public_key(key: Ed25519PublicKey, path: str | Path) -> None:
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(pem)
+
+
+def load_private_key(
+    path: str | Path,
+    password: str | bytes | None = None,
+) -> Ed25519PrivateKey:
+    """Load an Ed25519 private key from a PEM-encoded file.
+    
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        ValueError: If key format or password is invalid.
+    """
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(f"Private key file not found: {path}")
+    pw_bytes = password.encode("utf-8") if isinstance(password, str) else password
+    key = serialization.load_pem_private_key(p.read_bytes(), password=pw_bytes)
+    if not isinstance(key, Ed25519PrivateKey):
+        raise ValueError(f"Expected Ed25519 private key, got {type(key).__name__}")
+    return key
+
+
+def load_public_key(path: str | Path) -> Ed25519PublicKey:
+    """Load an Ed25519 public key from a PEM-encoded file.
+    
