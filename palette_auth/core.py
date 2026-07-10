@@ -83,3 +83,147 @@ def _save_palette_image(index_array: np.ndarray, palette: np.ndarray, path: str 
     out.save(p)
 
 
+def inspect(path: str | Path) -> dict[str, Any]:
+    """Parse a signed image's header and derive its block layout and
+    block-mapping, without doing full verification. Meant for tooling (e.g.
+    adversarial test scripts) that needs to know where a given block's
+    evidence lives -- an informed attacker could derive exactly this from
+    the public algorithm plus the image, so there's no extra secrecy lost
+    by exposing it here too."""
+    index_array, palette = _load_palette_image(path)
+    height, width = index_array.shape
+    pair_of = build_pair_map(palette)
+    header_region = index_array[0:MIN_BLOCK_SIZE, 0:MIN_BLOCK_SIZE]
+    header_bits = extract_bits_from_block(header_region, pair_of, HEADER_LEN * 8, start_slot=0)
+    header = bits_to_bytes(header_bits)
+    if header[:4] != MAGIC:
+        raise ValueError("no valid signature header found")
+    version = header[4]
+    if version != VERSION:
+        raise ValueError(f"unsupported header version: {version} (expected {VERSION})")
+    block_size = struct.unpack(">H", header[5:7])[0]
+    seed = header[11:19]
+    blocks = partition_blocks(height, width, block_size)
+    perm = build_block_mapping(seed, len(blocks), blocks=blocks)
+    return {
+        "blocks": blocks,
+        "perm": perm,
+        "pair_of": pair_of,
+        "palette": palette,
+        "index_array": index_array,
+        "block_size": block_size,
+        "version": version,
+    }
+
+
+@dataclass
+class VerificationResult:
+    authentic: bool
+    tampered_blocks: list[BlockCoords]
+    all_blocks: list[BlockCoords]
+    reason: str = ""
+    recovered_colors: dict[int, list[tuple[int, int, int]]] = field(default_factory=dict)
+    confident_tampered: list[BlockCoords] = field(default_factory=list)
+    uncertain_blocks: list[BlockCoords] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.confident_tampered and self.tampered_blocks:
+            self.confident_tampered = list(self.tampered_blocks)
+
+    @property
+    def total_blocks(self) -> int:
+        return len(self.all_blocks)
+
+    @property
+    def tampered_count(self) -> int:
+        return len(self.tampered_blocks)
+
+    @property
+    def confident_count(self) -> int:
+        return len(self.confident_tampered)
+
+    @property
+    def uncertain_count(self) -> int:
+        return len(self.uncertain_blocks)
+
+    @property
+    def tampered_ratio(self) -> float:
+        return len(self.tampered_blocks) / max(1, len(self.all_blocks))
+
+
+def sign_image(
+    input_path: str | Path,
+    output_path: str | Path,
+    private_key_path: str | Path,
+    block_size: int = MIN_BLOCK_SIZE,
+) -> dict[str, Any]:
+    """Sign a palette image, embedding authentication tags and recovery priors in-pixel."""
+    if block_size < MIN_BLOCK_SIZE:
+        raise ValueError(f"block_size must be >= {MIN_BLOCK_SIZE} (needs room for the header)")
+
+    index_array, palette = _load_palette_image(input_path)
+    height, width = index_array.shape
+    blocks = partition_blocks(height, width, block_size)
+    n_blocks = len(blocks)
+    if n_blocks < 3:
+        raise ValueError("image too small for this block size")
+
+    pair_of = build_pair_map(palette)
+    content = canonical_indices(index_array, pair_of)
+    rgb_array = palette[index_array]  # pristine RGB, captured before any embedding
+
+    hashes = [block_content_hash(content, b) for b in blocks]
+    recoveries = [block_recovery_digest(rgb_array, b) for b in blocks]
+    tags = [hashes[i] + recoveries[i] for i in range(n_blocks)]
+    root = hashlib.sha256(b"".join(hashes)).digest()
+
+    private_key = crypto.load_private_key(private_key_path)
+    signature = crypto.sign(private_key, root)
+
+    seed = np.random.default_rng().integers(0, 2**63 - 1, dtype=np.int64).tobytes()
+    perm = build_block_mapping(seed, n_blocks, blocks=blocks)
+    groups = destination_groups(perm, n_blocks)
+
+    header = (
+        MAGIC
+        + bytes([VERSION])
+        + struct.pack(">H", block_size)
+        + struct.pack(">I", n_blocks)
+        + seed[:8]
+        + signature
+    )
+    if len(header) != HEADER_LEN:
+        raise ValueError(f"Header construction error: expected {HEADER_LEN} bytes, got {len(header)}")
+
+    # Capacity checks up front so we fail loudly before mutating anything.
+    b0 = blocks[0]
+    b0_slice = index_array[b0.row0 : b0.row1, b0.col0 : b0.col1]
+    if block_capacity(b0_slice, pair_of) < HEADER_LEN * 8:
+        raise ValueError("not enough embeddable pixels in the top-left block for the header")
+    for dest_idx, sources in groups.items():
+        if not sources:
+            continue
+        needed = len(sources) * TAG_SIZE * 8
+        d = blocks[dest_idx]
+        d_slice = index_array[d.row0 : d.row1, d.col0 : d.col1]
+        if block_capacity(d_slice, pair_of) < needed:
+            raise ValueError(
+                f"block {dest_idx} needs {needed} embeddable bits for {len(sources)} tags "
+                f"(hash+recovery) but doesn't have them; try a larger block_size"
+            )
+
+    embed_bits_in_block(b0_slice, pair_of, bytes_to_bits(header), start_slot=0)
+    for dest_idx, sources in groups.items():
+        if not sources:
+            continue
+        d = blocks[dest_idx]
+        d_slice = index_array[d.row0 : d.row1, d.col0 : d.col1]
+        payload: list[int] = []
+        for src in sources:
+            payload.extend(bytes_to_bits(tags[src]))
+        embed_bits_in_block(d_slice, pair_of, payload, start_slot=0)
+
+    _save_palette_image(index_array, palette, output_path)
+    return {"n_blocks": n_blocks, "block_size": block_size, "output": str(output_path)}
+
+
