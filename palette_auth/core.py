@@ -227,3 +227,98 @@ def sign_image(
     return {"n_blocks": n_blocks, "block_size": block_size, "output": str(output_path)}
 
 
+def verify_image(input_path: str | Path, public_key_path: str | Path) -> VerificationResult:
+    """Verify a signed palette image and localize any tampered blocks."""
+    index_array, palette = _load_palette_image(input_path)
+    height, width = index_array.shape
+    pair_of = build_pair_map(palette)
+
+    # The header always lives in the top-left MIN_BLOCK_SIZE region --
+    # that's what lets us read it before we know the image's own block_size.
+    header_region = index_array[0:MIN_BLOCK_SIZE, 0:MIN_BLOCK_SIZE]
+    try:
+        header_bits = extract_bits_from_block(header_region, pair_of, HEADER_LEN * 8, start_slot=0)
+        header = bits_to_bytes(header_bits)
+    except ValueError:
+        return VerificationResult(False, [], [], reason="could not read a header (too small, or not signed)")
+
+    if header[:4] != MAGIC:
+        return VerificationResult(False, [], [], reason="no valid signature header found")
+    header_version = header[4]
+    if header_version != VERSION:
+        return VerificationResult(
+            False,
+            [],
+            [],
+            reason=f"unsupported header version: {header_version} (expected {VERSION})",
+        )
+    block_size = struct.unpack(">H", header[5:7])[0]
+    n_blocks_claimed = struct.unpack(">I", header[7:11])[0]
+    seed = header[11:19]
+    signature = header[19 : 19 + crypto.SIGNATURE_SIZE]
+
+    blocks = partition_blocks(height, width, block_size)
+    if len(blocks) != n_blocks_claimed:
+        return VerificationResult(False, [], blocks, reason="image dimensions don't match the signed original")
+
+    content = canonical_indices(index_array, pair_of)
+    hashes_now = [block_content_hash(content, b) for b in blocks]
+    root_now = hashlib.sha256(b"".join(hashes_now)).digest()
+
+    public_key = crypto.load_public_key(public_key_path)
+    globally_valid = crypto.verify(public_key, signature, root_now)
+
+    perm = build_block_mapping(seed, len(blocks), blocks=blocks)
+    groups = destination_groups(perm, len(blocks))
+
+    stored_hash_of: dict[int, bytes] = {}
+    stored_recovery_of: dict[int, bytes] = {}
+    for dest_idx, sources in groups.items():
+        if not sources:
+            continue
+        d = blocks[dest_idx]
+        d_slice = index_array[d.row0 : d.row1, d.col0 : d.col1]
+        needed_bits = len(sources) * TAG_SIZE * 8
+        try:
+            bits = extract_bits_from_block(d_slice, pair_of, needed_bits, start_slot=0)
+            payload = bits_to_bytes(bits)
+        except ValueError:
+            payload = b""
+        for i, src in enumerate(sources):
+            tag = payload[i * TAG_SIZE : (i + 1) * TAG_SIZE] if payload else b""
+            stored_hash_of[src] = tag[:BLOCK_HASH_SIZE] if tag else b""
+            stored_recovery_of[src] = tag[BLOCK_HASH_SIZE:] if tag else b""
+
+    tampered = [b for b in blocks if stored_hash_of.get(b.index) != hashes_now[b.index]]
+    tampered_idx = {b.index for b in tampered}
+    # A flagged block is only "confidently" tampered if the block holding
+    # *its* evidence wasn't itself flagged -- otherwise the mismatch could
+    # just as easily mean the evidence was corrupted, not the block itself.
+    confident = [b for b in tampered if perm[b.index] not in tampered_idx]
+    uncertain = [b for b in tampered if perm[b.index] in tampered_idx]
+
+    recovered_colors: dict[int, list[tuple[int, int, int]]] = {}
+    for b in confident:
+        digest = stored_recovery_of.get(b.index, b"")
+        if len(digest) == RECOVERY_SIZE:
+            cells = [tuple(digest[i : i + 3]) for i in range(0, RECOVERY_SIZE, 3)]
+            recovered_colors[b.index] = cells
+
+    authentic = globally_valid and not tampered
+    if authentic:
+        reason = ""
+    elif not globally_valid:
+        reason = "global signature mismatch"
+    else:
+        reason = "localized tampering detected"
+    return VerificationResult(
+        authentic,
+        tampered,
+        blocks,
+        reason=reason,
+        recovered_colors=recovered_colors,
+        confident_tampered=confident,
+        uncertain_blocks=uncertain,
+    )
+
+
