@@ -23,3 +23,13 @@ from .crypto import (
 
 __version__ = "1.2.0"
 
+_AI_EXPORTS = {
+    "DualStreamForensicNet": (".ai_detector", "DualStreamForensicNet"),
+    "TamperCNN": (".ai_detector", "TamperCNN"),
+    "neural_recover_image": (".neural_recovery", "neural_recover_image"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _AI_EXPORTS:
+        module_name, attr_name = _AI_EXPORTS[name]
