@@ -1,0 +1,7 @@
+pillow>=10.0
+numpy>=1.24
+cryptography>=42.0
+
+# Optional AI dependencies: install with: pip install "palette-auth[ai]"
+# torch>=2.0
+# scipy>=1.10
