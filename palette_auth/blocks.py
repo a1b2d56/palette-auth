@@ -63,3 +63,18 @@ def block_content_hash(content_array: np.ndarray, block: BlockCoords) -> bytes:
     return hashlib.sha256(payload).digest()[:BLOCK_HASH_SIZE]
 
 
+def block_recovery_digest(rgb_array: np.ndarray, block: BlockCoords, grid: int = RECOVERY_GRID) -> bytes:
+    """A coarse grid x grid average-color thumbnail of one block in the
+    *original* RGB image, captured at signing time. If the block later
+    fails its hash check, this is enough to paint a blurry but genuine
+    approximation of what used to be there instead of leaving the
+    tampered pixels on screen."""
+    patch = rgb_array[block.row0 : block.row1, block.col0 : block.col1]
+    h, w = patch.shape[:2]
+    out = bytearray()
+    for gy in range(grid):
+        y0, y1 = h * gy // grid, max(h * gy // grid + 1, h * (gy + 1) // grid)
+        for gx in range(grid):
+            x0, x1 = w * gx // grid, max(w * gx // grid + 1, w * (gx + 1) // grid)
+            mean = patch[y0:y1, x0:x1].reshape(-1, 3).mean(axis=0)
+            out.extend(int(round(c)) for c in mean)
