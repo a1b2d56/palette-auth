@@ -78,3 +78,28 @@ def block_recovery_digest(rgb_array: np.ndarray, block: BlockCoords, grid: int =
             x0, x1 = w * gx // grid, max(w * gx // grid + 1, w * (gx + 1) // grid)
             mean = patch[y0:y1, x0:x1].reshape(-1, 3).mean(axis=0)
             out.extend(int(round(c)) for c in mean)
+    return bytes(out)
+
+
+def build_block_mapping(seed: bytes, n_blocks: int, blocks: list[BlockCoords] | None = None) -> list[int]:
+    """perm[i] = the block that stores block i's authentication tag.
+    perm[i] is never i, and never 0 (block 0 is reserved for the header).
+    When `blocks` coordinates are provided, candidates are selected from
+    spatially distant regions with balanced load distribution to prevent
+    capacity overflow and avoid mutual destruction during localized tampering.
+    Deterministic given (seed, n_blocks, blocks) so sign and verify agree."""
+    if n_blocks < 3:
+        raise ValueError("need at least 3 blocks for this scheme")
+    rng = random.Random(seed)
+
+    load = {d: 0 for d in range(1, n_blocks)}
+    perm = [-1] * n_blocks
+    sources = list(range(n_blocks))
+    rng.shuffle(sources)
+
+    if blocks and len(blocks) == n_blocks:
+        centers = [
+            ((b.row0 + b.row1) / 2.0, (b.col0 + b.col1) / 2.0)
+            for b in blocks
+        ]
+        for s in sources:
