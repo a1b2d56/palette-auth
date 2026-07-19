@@ -10,3 +10,26 @@
 
 No sidecar files, external manifests, or out-of-band databases are required: verifying an image verifies whether it has been altered since signing, pinpoints the tampered spatial blocks, and reconstructs the modified regions.
 
+---
+
+## Architecture Overview
+
+```
+                          SIGNING PIPELINE
+  [Input Image] ──> [Pair Map (min(Ca, Cb))] ──> [Block Hashes + 2x2 RGB Priors]
+                           │                                  │
+                           ▼                                  ▼
+                  [Root SHA-256 Digest]          [Distance-Max PRNG Mapping]
+                           │                                  │
+                           ▼ (Ed25519)                        ▼
+                  [Digital Signature]            [Embed into Partner Blocks]
+                           │                                  │
+                           ▼                                  │
+                 [Header in Block 0]                          │
+                           └─────────────────┬────────────────┘
+                                             ▼
+                                  [Authenticated Image]
+```
+
+```
+                        VERIFICATION PIPELINE
