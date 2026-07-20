@@ -103,3 +103,34 @@ def build_block_mapping(seed: bytes, n_blocks: int, blocks: list[BlockCoords] | 
             for b in blocks
         ]
         for s in sources:
+            ci = centers[s]
+            candidates = [d for d in range(1, n_blocks) if d != s]
+            min_load = min(load[d] for d in candidates)
+            best_cands = [d for d in candidates if load[d] == min_load]
+            best_cands.sort(
+                key=lambda d: (ci[0] - centers[d][0]) ** 2 + (ci[1] - centers[d][1]) ** 2,
+                reverse=True,
+            )
+            cutoff = max(1, len(best_cands) // 2)
+            chosen = rng.choice(best_cands[:cutoff])
+            perm[s] = chosen
+            load[chosen] += 1
+    else:
+        for s in sources:
+            candidates = [d for d in range(1, n_blocks) if d != s]
+            min_load = min(load[d] for d in candidates)
+            best_cands = [d for d in candidates if load[d] == min_load]
+            chosen = rng.choice(best_cands)
+            perm[s] = chosen
+            load[chosen] += 1
+
+    return perm
+
+
+def destination_groups(perm: list[int], n_blocks: int) -> dict[int, list[int]]:
+    """Inverse of perm: for each destination block, which source blocks'
+    tags live there, in a fixed (sorted) order agreed by sign and verify."""
+    groups: dict[int, list[int]] = {d: [] for d in range(n_blocks)}
+    for source, dest in enumerate(perm):
+        groups[dest].append(source)
+    return {d: sorted(v) for d, v in groups.items()}
