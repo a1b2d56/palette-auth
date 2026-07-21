@@ -22,3 +22,14 @@ def test_block_content_hash():
 
 def test_load_balanced_spatial_mapping():
     grid = blocks.partition_blocks(128, 128, 32) # 16 blocks
+    n_blocks = len(grid)
+    seed = b"testseed1234"
+    perm = blocks.build_block_mapping(seed, n_blocks, blocks=grid)
+    
+    assert len(perm) == n_blocks
+    assert not any(perm[i] == i for i in range(n_blocks))
+    assert not any(perm[i] == 0 for i in range(n_blocks))
+    
+    groups = blocks.destination_groups(perm, n_blocks)
+    max_load = max(len(srcs) for srcs in groups.values())
+    assert max_load <= 2
