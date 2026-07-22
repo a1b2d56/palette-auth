@@ -33,3 +33,18 @@ No sidecar files, external manifests, or out-of-band databases are required: ver
 
 ```
                         VERIFICATION PIPELINE
+  [Suspect Image] ──> [Extract Header from Block 0] ──> [Verify Ed25519 Root]
+                             │
+                             ├─ If Root Signature Invalid:
+                             │    ├── [Extract Block Tags from Partner Blocks]
+                             │    ├── [Recompute Canonical Block Hashes]
+                             │    ├── [Localize Tampered Coordinates]
+                             │    └── [Self-Recovery: 2x2 Priors + Poisson Relaxation]
+                             │
+                             └─ If Root Signature Valid:
+                                  └── Authentic (Zero Modification)
+```
+
+---
+
+## Core Technical Concepts
