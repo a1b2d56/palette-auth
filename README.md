@@ -48,3 +48,23 @@ No sidecar files, external manifests, or out-of-band databases are required: ver
 ---
 
 ## Core Technical Concepts
+
+### 1. The Canonical Pair-Swap Invariant
+In indexed color images (e.g. 256-color PNGs), pixels store palette indices rather than direct RGB values. Modifying the least significant bit of an index directly alters the color drastically. 
+
+To solve this, `palette-auth` computes an optimal Euclidean color pairing:
+- Each palette color $c_a$ is greedily paired with its nearest neighbor $c_b$ in RGB space.
+- A bit $1$ is represented by $\max(c_a, c_b)$, while bit $0$ is represented by $\min(c_a, c_b)$.
+- Before computing SHA-256 content hashes, indices are mapped to their canonical representative $\min(c_a, c_b)$.
+- **Result**: Embedding signatures via pair swaps is mathematically invariant to the hash computation, eliminating the cyclic dependency of signing steganographic content.
+
+### 2. Distance-Maximizing Permutation
+If a block's authentication tag were stored within itself, an attacker editing that block could easily destroy the verification evidence. 
+
+`palette-auth` maps each block's tag into a distant partner block using a keyed pseudo-random permutation seeded in the image header:
+- Partner blocks are chosen to maximize spatial Euclidean distance.
+- Load-balancing ensures uniform payload distribution across blocks.
+- If an attacker tampers with a localized region, the evidence remains safely preserved in untouched blocks elsewhere on the canvas.
+
+### 3. Two-Tier Self-Recovery
+When localized tampering is detected, the framework can reconstruct the missing content:
