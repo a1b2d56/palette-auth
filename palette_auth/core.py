@@ -322,3 +322,24 @@ def verify_image(input_path: str | Path, public_key_path: str | Path) -> Verific
     )
 
 
+def _blocks_are_adjacent(a: BlockCoords, b: BlockCoords) -> bool:
+    """Return True if block a and block b touch or share a boundary/corner."""
+    return (
+        a.index != b.index
+        and max(a.row0, b.row0) <= min(a.row1, b.row1)
+        and max(a.col0, b.col0) <= min(a.col1, b.col1)
+    )
+
+
+def _is_adjacent_to_set(
+    block: BlockCoords,
+    block_set: set[int],
+    all_blocks: list[BlockCoords],
+    block_size: int | None = None,
+) -> bool:
+    """Check if block touches any block index in block_set."""
+    for idx in block_set:
+        if 0 <= idx < len(all_blocks) and _blocks_are_adjacent(block, all_blocks[idx]):
+            return True
+    return False
+
