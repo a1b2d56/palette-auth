@@ -343,3 +343,37 @@ def _is_adjacent_to_set(
             return True
     return False
 
+
+def render_tamper_map(
+    input_path: str | Path,
+    result: VerificationResult,
+    output_path: str | Path,
+    fill_color: tuple[int, int, int, int] = (255, 0, 0, 120),
+    outline_color: tuple[int, int, int, int] = (255, 0, 0, 255),
+) -> None:
+    """Render a visual overlay highlighting the tampered blocks.
+    Confident tampered blocks and adjacent cluster blocks are highlighted in red;
+    isolated collateral blocks are left unhighlighted so the true forgery region is clear."""
+    img = Image.open(input_path).convert("RGBA")
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    confident_indices = {b.index for b in result.confident_tampered}
+    primary_blocks = [
+        b for b in result.tampered_blocks
+        if b.index in confident_indices or _is_adjacent_to_set(b, confident_indices, result.all_blocks)
+    ]
+    if not primary_blocks:
+        primary_blocks = result.tampered_blocks
+
+    for b in primary_blocks:
+        draw.rectangle(
+            [b.col0, b.row0, b.col1 - 1, b.row1 - 1],
+            fill=fill_color,
+            outline=outline_color,
+        )
+    p = Path(output_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    Image.alpha_composite(img, overlay).convert("RGB").save(p)
+
+
