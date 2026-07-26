@@ -377,3 +377,39 @@ def render_tamper_map(
     Image.alpha_composite(img, overlay).convert("RGB").save(p)
 
 
+def render_recovery(
+    input_path: str | Path,
+    result: VerificationResult,
+    output_path: str | Path,
+    grid: int = RECOVERY_GRID,
+    method: str = "bilinear",
+) -> None:
+    """For every tampered block, restore an approximate reconstruction:
+    1. If method == 'neural', invoke AI Neural Inpainting & super-resolution.
+    2. Otherwise, use bilinear upsampling + contextual cluster inpainting.
+    """
+    if method == "neural":
+        try:
+            from .neural_recovery import neural_recover_image
+            neural_recover_image(input_path, result, output_path)
+            return
+        except Exception as exc:
+            logger.warning("Neural recovery failed or unavailable, falling back to bilinear: %s", exc)
+
+    img = Image.open(input_path).convert("RGB")
+    arr = np.array(img, dtype=np.float32)
+    height, width = arr.shape[:2]
+
+    confident_indices = {b.index for b in result.confident_tampered}
+
+    # 1. Recover confident blocks using smooth bilinear upsampling
+    for b in result.confident_tampered:
+        cells = result.recovered_colors.get(b.index)
+        if not cells:
+            continue
+        h, w = b.height(), b.width()
+        mini = np.array(cells, dtype=np.float32).reshape(grid, grid, 3)
+        mini_img = Image.fromarray(mini.astype(np.uint8), mode="RGB")
+        mini_smooth = mini_img.resize((w, h), Image.Resampling.BILINEAR)
+        arr[b.row0 : b.row1, b.col0 : b.col1] = np.array(mini_smooth, dtype=np.float32)
+
