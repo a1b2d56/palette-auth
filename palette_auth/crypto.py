@@ -88,3 +88,30 @@ def load_private_key(
 def load_public_key(path: str | Path) -> Ed25519PublicKey:
     """Load an Ed25519 public key from a PEM-encoded file.
     
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        ValueError: If key format is invalid.
+    """
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(f"Public key file not found: {path}")
+    key = serialization.load_pem_public_key(p.read_bytes())
+    if not isinstance(key, Ed25519PublicKey):
+        raise ValueError(f"Expected Ed25519 public key, got {type(key).__name__}")
+    return key
+
+
+def sign(private_key: Ed25519PrivateKey, message: bytes) -> bytes:
+    """Sign a byte message using an Ed25519 private key, returning a 64-byte signature."""
+    return private_key.sign(message)
+
+
+def verify(public_key: Ed25519PublicKey, signature: bytes, message: bytes) -> bool:
+    """Verify an Ed25519 signature against message bytes. Returns True if authentic."""
+    try:
+        public_key.verify(signature, message)
+        return True
+    except InvalidSignature:
+        return False
+    except Exception:
+        return False
