@@ -86,3 +86,44 @@ def attack_single_pixel(signed, pubkey):
           f"{len(r.tampered_blocks)}/{len(r.all_blocks)} blocks flagged (1 pixel modified)")
 
 
+def attack_pair_preserving(signed, pubkey):
+    print("\n[Test 4] Pair-preserving substitution analysis")
+    print("Testing theoretical edge case where pixels are substituted with designated pair partners.")
+    from palette_auth.blocks import destination_groups
+
+    info = core.inspect(signed)
+    blocks, perm, pair_of, palette = info["blocks"], info["perm"], info["pair_of"], info["palette"]
+    groups = destination_groups(perm, len(blocks))
+    candidates = [b for b in blocks if not groups[b.index] and b.index != 0]
+    target = candidates[0] if candidates else blocks[1]
+
+    idx_array = info["index_array"].copy()
+    sub = idx_array[target.row0 : target.row1, target.col0 : target.col1]
+    flat = sub.reshape(-1)
+    n_flipped = sum(1 for i in range(len(flat)) if int(flat[i]) in pair_of)
+    for i in range(len(flat)):
+        a = int(flat[i])
+        if a in pair_of:
+            flat[i] = pair_of[a]
+    idx_array[target.row0 : target.row1, target.col0 : target.col1] = flat.reshape(sub.shape)
+
+    rgb_before = palette[info["index_array"][target.row0:target.row1, target.col0:target.col1]]
+    rgb_after = palette[idx_array[target.row0:target.row1, target.col0:target.col1]]
+    color_shift = np.abs(rgb_before.astype(int) - rgb_after.astype(int)).mean()
+
+    out = Image.fromarray(idx_array, "P")
+    out.putpalette(palette.flatten().tolist())
+    path = OUT / "attack_pair_preserving.png"
+    out.save(path)
+
+    r = core.verify_image(path, pubkey)
+    print(f"Pixels substituted: {n_flipped}/{sub.size} (mean RGB shift: {color_shift:.1f}/255)")
+    print(f"Result: authentic={r.authentic}, {len(r.tampered_blocks)}/{len(r.all_blocks)} blocks flagged")
+
+
+if __name__ == "__main__":
+    signed_path, pubkey_path = setup()
+    attack_copy_move(signed_path, pubkey_path)
+    attack_informed_collateral(signed_path, pubkey_path)
+    attack_single_pixel(signed_path, pubkey_path)
+    attack_pair_preserving(signed_path, pubkey_path)
