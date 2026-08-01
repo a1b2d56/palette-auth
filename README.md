@@ -68,3 +68,28 @@ If a block's authentication tag were stored within itself, an attacker editing t
 
 ### 3. Two-Tier Self-Recovery
 When localized tampering is detected, the framework can reconstruct the missing content:
+- **Baseline Priors**: Each block tag carries a 12-byte digest representing a $2 \times 2$ downsampled RGB average of the pristine content.
+- **Harmonic Poisson Relaxation**: For contiguous tampered clusters, the recovery engine upsamples color priors, anchors structural features, and solves a discrete Dirichlet Poisson relaxation ($\nabla^2 E = 0$) along cluster boundaries to guarantee $C^1$ smoothness with zero boundary seam artifacts.
+- **Guided Neural Inpainting**: When PyTorch is available, an optional gated convolutional network fuses the steganographic color priors with contextual surrounding textures.
+
+### 4. Passive Forensic Saliency (No Keys Required)
+When no cryptographic key is available, `palette-auth` includes passive forensic detection tools:
+- **Spatial Rich Model (SRM)**: A 30-filter high-pass residual bank capturing 1st/2nd-order derivatives and Laplacian curvature to detect statistical noise anomalies.
+- **Error Level Analysis (ELA)**: Evaluates compression history discrepancies across image regions.
+- **Dual-Stream CNN**: Combines RGB texture features with SRM high-pass residual maps to highlight spliced boundaries and generative infill.
+
+---
+
+## Installation
+
+### Core Package (Lightweight, Zero PyTorch Dependency)
+```bash
+pip install palette-auth
+```
+*Dependencies: `pillow`, `numpy`, `cryptography`.*
+
+### With Optional Deep Learning & Forensics
+```bash
+pip install "palette-auth[ai]"
+```
+*Adds: `torch`, `scipy`.*
