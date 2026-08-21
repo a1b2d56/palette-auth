@@ -108,3 +108,33 @@ def compute_ela(
     diff = np.abs(orig_arr - resaved_arr)
     ela = np.clip(diff * (scale / 255.0), 0.0, 1.0)
     return ela
+
+
+def compute_noise_inconsistency(
+    image: Union[str, Path, Image.Image, np.ndarray],
+    block_size: int = PATCH,
+) -> np.ndarray:
+    """Estimate local high-frequency noise variance per block across the image."""
+    if isinstance(image, (str, Path)):
+        img = Image.open(image).convert("L")
+    elif isinstance(image, np.ndarray):
+        img = Image.fromarray(image.astype(np.uint8)).convert("L")
+    else:
+        img = image.convert("L")
+
+    arr = np.array(img, dtype=np.float32) / 255.0
+    h, w = arr.shape
+    # 3x3 Laplacian residual
+    lap = np.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]], dtype=np.float32)
+    pad = np.pad(arr, 1, mode="reflect")
+    res = (
+        pad[1 : h + 1, 1 : w + 1] * 4.0
+        - pad[0 : h, 1 : w + 1]
+        - pad[2 : h + 2, 1 : w + 1]
+        - pad[1 : h + 1, 0 : w]
+        - pad[1 : h + 1, 2 : w + 2]
+    )
+
+    blocks = partition_blocks(h, w, block_size)
+    variances = []
+    for b in blocks:
