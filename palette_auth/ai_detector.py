@@ -138,3 +138,123 @@ def compute_noise_inconsistency(
     blocks = partition_blocks(h, w, block_size)
     variances = []
     for b in blocks:
+        patch_res = res[b.row0 : b.row1, b.col0 : b.col1]
+        variances.append(float(np.var(patch_res)))
+
+    var_arr = np.array(variances, dtype=np.float32)
+    median_var = float(np.median(var_arr)) + 1e-6
+    # Relative noise divergence
+    divergence = np.abs(var_arr - median_var) / median_var
+    return np.clip(divergence / 3.0, 0.0, 1.0)
+
+
+# ------------------------------------------------ PyTorch Forensic CNN --
+
+if HAS_TORCH:
+    class ConvBlock(nn.Module):
+        def __init__(self, in_c: int, out_c: int, stride: int = 1):
+            super().__init__()
+            self.conv = nn.Conv2d(in_c, out_c, kernel_size=3, stride=stride, padding=1, bias=False)
+            self.bn = nn.BatchNorm2d(out_c)
+            self.act = nn.LeakyReLU(0.2, inplace=True)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            return self.act(self.bn(self.conv(x)))
+
+    class ResidualBlock(nn.Module):
+        def __init__(self, channels: int):
+            super().__init__()
+            self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False)
+            self.bn1 = nn.BatchNorm2d(channels)
+            self.act = nn.LeakyReLU(0.2, inplace=True)
+            self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False)
+            self.bn2 = nn.BatchNorm2d(channels)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            res = self.conv2(self.act(self.bn1(self.conv1(x))))
+            return self.act(x + self.bn2(res))
+
+    class DualStreamForensicNet(nn.Module):
+        """Dual-Stream Forensic Neural Network.
+        
+        Stream 1: Fixed 30-filter SRM High-Pass Residual Bank + 2 Residual Blocks
+        Stream 2: RGB Spatial Texture Feature Extractor + Residual Block
+        Fusion: Concatenation -> 1x1 Bottleneck -> Global Pooling -> Sigmoid
+        """
+        def __init__(self, pretrained_srm: bool = True):
+            super().__init__()
+            # 1. SRM Stream
+            self.srm_conv = nn.Conv2d(3, 30, kernel_size=3, padding=1, bias=False)
+            if pretrained_srm:
+                srm_w = torch.from_numpy(get_srm_filters())
+                self.srm_conv.weight = nn.Parameter(srm_w, requires_grad=False)
+            self.srm_proj = ConvBlock(30, 32)
+            self.srm_res = ResidualBlock(32)
+
+            # 2. Spatial Stream
+            self.spa_proj = ConvBlock(3, 32)
+            self.spa_res = ResidualBlock(32)
+
+            # 3. Fusion Stream & Classification Head
+            self.fuse = ConvBlock(64, 32)
+            self.head = nn.Sequential(
+                nn.AdaptiveAvgPool2d((1, 1)),
+                nn.Flatten(),
+                nn.Linear(32, 16),
+                nn.LeakyReLU(0.2, inplace=True),
+                nn.Linear(16, 1),
+                nn.Sigmoid(),
+            )
+            self._init_weights()
+
+        def _init_weights(self) -> None:
+            for m in [self.srm_proj, self.srm_res, self.spa_proj, self.spa_res, self.fuse]:
+                for submodule in m.modules():
+                    if isinstance(submodule, nn.Conv2d):
+                        nn.init.kaiming_normal_(submodule.weight, mode="fan_out", nonlinearity="leaky_relu")
+                    elif isinstance(submodule, nn.BatchNorm2d):
+                        nn.init.constant_(submodule.weight, 1.0)
+                        nn.init.constant_(submodule.bias, 0.0)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            """x: (B, 3, H, W) normalized to [0, 1]. Returns: (B, 1) tamper probability."""
+            # Stream 1: SRM Residuals with Tanh truncation
+            res = torch.tanh(self.srm_conv(x) * 3.0)
+            f_res = self.srm_res(self.srm_proj(res))
+
+            # Stream 2: Spatial Textures
+            f_spa = self.spa_res(self.spa_proj(x))
+
+            # Fusion
+            f_comb = torch.cat([f_res, f_spa], dim=1)
+            f_feat = self.fuse(f_comb)
+            out = self.head(f_feat)
+            return out
+
+        def score_patch(self, patch_rgb: np.ndarray) -> float:
+            """Score a single (H, W, 3) patch [0, 1] for manipulation probability."""
+            self.eval()
+            with torch.no_grad():
+                tensor = torch.from_numpy(np.transpose(patch_rgb, (2, 0, 1))).unsqueeze(0).float()
+                prob = float(self.forward(tensor).item())
+            return prob
+
+else:
+    # Pure NumPy fallback engine when PyTorch is not installed
+    class DualStreamForensicNet:  # type: ignore
+        def __init__(self, *args, **kwargs):
+            self.srm_w = get_srm_filters()
+
+        def score_patch(self, patch_rgb: np.ndarray) -> float:
+            x = np.transpose(patch_rgb, (2, 0, 1)).astype(np.float32)
+            # High-pass energy
+            diff_y = np.diff(x, axis=1)
+            diff_x = np.diff(x, axis=2)
+            grad = float(np.mean(np.abs(diff_y)) + np.mean(np.abs(diff_x)))
+            return float(1.0 / (1.0 + np.exp(-np.clip(grad * 12.0 - 1.5, -10.0, 10.0))))
+
+        def eval(self):
+            return self
+
+
+# Backward-compatible aliases
