@@ -258,3 +258,103 @@ else:
 
 
 # Backward-compatible aliases
+DualStreamForensicEngine = DualStreamForensicNet
+TamperCNN = DualStreamForensicNet
+
+_DEFAULT_ENGINE = None
+
+
+def get_default_forensic_engine() -> DualStreamForensicNet:
+    """Return a cached default forensic detector instance.
+    
+    If bundled weights exist at palette_auth/models/forensic_detector.pt,
+    they are loaded automatically; otherwise, the engine initializes with
+    calibrated analytical SRM filters.
+    """
+    global _DEFAULT_ENGINE
+    if _DEFAULT_ENGINE is None:
+        bundled_weights = Path(__file__).parent / "models" / "forensic_detector.pt"
+        if HAS_TORCH and bundled_weights.is_file():
+            try:
+                _DEFAULT_ENGINE = load_model(bundled_weights)
+            except Exception as exc:
+                logger.warning("Failed to load bundled forensic weights (%s), using analytical initialization", exc)
+                _DEFAULT_ENGINE = DualStreamForensicNet()
+        else:
+            _DEFAULT_ENGINE = DualStreamForensicNet()
+        if HAS_TORCH:
+            _DEFAULT_ENGINE.eval()
+    return _DEFAULT_ENGINE
+
+
+# ------------------------------------------------ Synthetic Training Pipeline --
+
+def generate_synthetic_dataset(
+    n_per_class: int = 2000,
+    patch_size: int = PATCH,
+    seed: int = 42,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Generate synthetic patches for training: Authentic (0) vs Tampered (1).
+    
+    - Class 0 (Authentic): smooth gradients, continuous textures, authentic sensor noise.
+    - Class 1 (Tampered): edge splicing, local boundary mismatch, inpainting blur, noise disparity.
+    """
+    rng = np.random.default_rng(seed)
+    patches = []
+    labels = []
+
+    # 1. Authentic class (0)
+    for _ in range(n_per_class):
+        # Base color + smooth gradient + gentle noise
+        base = rng.uniform(0.1, 0.9, (1, 1, 3))
+        grad_x = np.linspace(0, rng.uniform(-0.3, 0.3), patch_size).reshape(1, patch_size, 1)
+        grad_y = np.linspace(0, rng.uniform(-0.3, 0.3), patch_size).reshape(patch_size, 1, 1)
+        noise = rng.normal(0, 0.015, (patch_size, patch_size, 3))
+        patch = np.clip(base + grad_x + grad_y + noise, 0.0, 1.0).astype(np.float32)
+        patches.append(patch)
+        labels.append(0.0)
+
+    # 2. Tampered class (1)
+    for _ in range(n_per_class):
+        base = rng.uniform(0.1, 0.9, (patch_size, patch_size, 3))
+        mode = rng.integers(0, 3)
+        if mode == 0:
+            # Spliced sharp edge cut-paste
+            cut = rng.integers(8, patch_size - 8)
+            splice = rng.uniform(0.1, 0.9, (patch_size, patch_size, 3))
+            base[:, cut:] = splice[:, cut:]
+        elif mode == 1:
+            # Blur / Inpainting boundary with frequency decay
+            center = patch_size // 2
+            r = rng.integers(6, 12)
+            y, x = np.ogrid[:patch_size, :patch_size]
+            mask = (x - center) ** 2 + (y - center) ** 2 <= r ** 2
+            mean_color = np.mean(base, axis=(0, 1), keepdims=True)
+            base[mask] = mean_color
+        else:
+            # Steganographic / noise perturbation seam
+            seam = rng.integers(10, patch_size - 10)
+            base[seam, :] += rng.uniform(0.15, 0.35, (patch_size, 3))
+        patch = np.clip(base, 0.0, 1.0).astype(np.float32)
+        patches.append(patch)
+        labels.append(1.0)
+
+    x = np.array(patches, dtype=np.float32)
+    y = np.array(labels, dtype=np.float32).reshape(-1, 1)
+    # Shuffle
+    idx = rng.permutation(len(x))
+    return x[idx], y[idx]
+
+
+def train(
+    n_per_class: int = 2000,
+    epochs: int = 15,
+    lr: float = 1e-3,
+    batch_size: int = 64,
+    seed: int = 42,
+    device: str | None = None,
+) -> tuple[DualStreamForensicNet, dict[str, list[float]]]:
+    """Train the Dual-Stream Forensic CNN with synthetic manipulation data using BCE loss."""
+    if not HAS_TORCH:
+        raise RuntimeError("PyTorch is required to train the forensic detector. Install with: pip install torch")
+
