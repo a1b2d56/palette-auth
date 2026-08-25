@@ -358,3 +358,91 @@ def train(
     if not HAS_TORCH:
         raise RuntimeError("PyTorch is required to train the forensic detector. Install with: pip install torch")
 
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    x_np, y_np = generate_synthetic_dataset(n_per_class=n_per_class, seed=seed)
+    n_val = int(len(x_np) * 0.15)
+    x_train, x_val = x_np[n_val:], x_np[:n_val]
+    y_train, y_val = y_np[n_val:], y_np[:n_val]
+
+    # Convert to BCHW tensors
+    x_train_t = torch.from_numpy(np.transpose(x_train, (0, 3, 1, 2))).float().to(device)
+    y_train_t = torch.from_numpy(y_train).float().to(device)
+    x_val_t = torch.from_numpy(np.transpose(x_val, (0, 3, 1, 2))).float().to(device)
+    y_val_t = torch.from_numpy(y_val).float().to(device)
+
+    model = DualStreamForensicNet(pretrained_srm=True).to(device)
+    criterion = nn.BCELoss()
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+
+    history: dict[str, list[float]] = {"train_loss": [], "val_loss": [], "val_acc": []}
+    n_batches = int(np.ceil(len(x_train_t) / batch_size))
+
+    model.train()
+    for ep in range(epochs):
+        perm = torch.randperm(len(x_train_t))
+        total_loss = 0.0
+        for b in range(n_batches):
+            b_idx = perm[b * batch_size : (b + 1) * batch_size]
+            bx, by = x_train_t[b_idx], y_train_t[b_idx]
+
+            optimizer.zero_grad()
+            preds = model(bx)
+            loss = criterion(preds, by)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+
+        avg_loss = total_loss / n_batches
+        model.eval()
+        with torch.no_grad():
+            v_preds = model(x_val_t)
+            v_loss = criterion(v_preds, y_val_t).item()
+            v_acc = float(((v_preds > 0.5) == (y_val_t > 0.5)).float().mean().item())
+
+        history["train_loss"].append(avg_loss)
+        history["val_loss"].append(v_loss)
+        history["val_acc"].append(v_acc)
+        model.train()
+
+    model.eval()
+    return model.cpu(), history
+
+
+def save_model(model: Any, path: str | Path) -> None:
+    """Save model weights to a file (.pt)."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if HAS_TORCH and isinstance(model, nn.Module):
+        torch.save(model.state_dict(), p)
+    else:
+        logger.warning("Saving non-PyTorch model weights stub to %s", p)
+        p.write_bytes(b"PALETTE_AUTH_FORENSIC_MODEL_V1")
+
+
+def load_model(path: str | Path, device: str = "cpu") -> DualStreamForensicNet:
+    """Load model weights from a .pt file."""
+    if not HAS_TORCH:
+        raise RuntimeError("PyTorch required to load .pt forensic weights")
+    model = DualStreamForensicNet()
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(f"Model file not found: {path}")
+    state = torch.load(p, map_location=device, weights_only=True)
+    model.load_state_dict(state)
+    model.eval()
+    return model
+
+
+# ------------------------------------------------ Inference & Heatmap Rendering --
+
+def predict_heatmap(
+    image_path: Union[str, Path, Image.Image],
+    model: DualStreamForensicEngine | None = None,
+    block_size: int = PATCH,
+    fuse_ela: bool = True,
+) -> tuple[list, np.ndarray]:
