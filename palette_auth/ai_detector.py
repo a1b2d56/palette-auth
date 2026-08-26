@@ -446,3 +446,96 @@ def predict_heatmap(
     block_size: int = PATCH,
     fuse_ela: bool = True,
 ) -> tuple[list, np.ndarray]:
+    """Runs forensic analysis block-by-block over an image.
+    
+    Combines the Dual-Stream CNN output with Error Level Analysis (ELA) and
+    local noise variance inconsistency for reliable keyless tamper localization.
+    """
+    if model is None:
+        model = get_default_forensic_engine()
+
+    if isinstance(image_path, (str, Path)):
+        img = Image.open(image_path).convert("RGB")
+    else:
+        img = image_path.convert("RGB")
+
+    arr = np.array(img, dtype=np.uint8)
+    height, width = arr.shape[:2]
+    blocks = partition_blocks(height, width, block_size)
+
+    # 1. Neural patch scores (Batched for ultra-fast GPU/CPU inference)
+    if HAS_TORCH and isinstance(model, nn.Module):
+        model.eval()
+        patches = []
+        for b in blocks:
+            patch = arr[b.row0 : b.row1, b.col0 : b.col1].astype(np.float32) / 255.0
+            if patch.shape[0] != block_size or patch.shape[1] != block_size:
+                pad = np.zeros((block_size, block_size, 3), dtype=np.float32)
+                pad[: patch.shape[0], : patch.shape[1]] = patch
+                patch = pad
+            patches.append(np.transpose(patch, (2, 0, 1)))
+        batch_t = torch.from_numpy(np.array(patches, dtype=np.float32)).float()
+        with torch.no_grad():
+            prob_arr = model(batch_t).squeeze(-1).cpu().numpy().astype(np.float32)
+    else:
+        probs = []
+        for b in blocks:
+            patch = arr[b.row0 : b.row1, b.col0 : b.col1].astype(np.float32) / 255.0
+            if patch.shape[0] != block_size or patch.shape[1] != block_size:
+                pad = np.zeros((block_size, block_size, 3), dtype=np.float32)
+                pad[: patch.shape[0], : patch.shape[1]] = patch
+                patch = pad
+            p = model.score_patch(patch)
+            probs.append(p)
+        prob_arr = np.array(probs, dtype=np.float32)
+
+    # 2. Multi-signal fusion with ELA and noise inconsistency
+    if fuse_ela:
+        try:
+            ela_map = compute_ela(img, quality=90, scale=18.0)
+            noise_scores = compute_noise_inconsistency(img, block_size=block_size)
+            ela_scores = []
+            for b in blocks:
+                ela_p = float(np.mean(ela_map[b.row0 : b.row1, b.col0 : b.col1]))
+                ela_scores.append(ela_p)
+            ela_arr = np.array(ela_scores, dtype=np.float32)
+            # Weighted multi-signal fusion: 0.60 Neural + 0.25 ELA + 0.15 Noise
+            prob_arr = 0.60 * prob_arr + 0.25 * np.clip(ela_arr * 3.5, 0, 1) + 0.15 * noise_scores
+            prob_arr = np.clip(prob_arr, 0.0, 1.0)
+        except Exception as exc:
+            logger.debug("Forensic multi-signal ELA/Noise fusion skipped: %s", exc)
+
+    return blocks, prob_arr
+
+
+def render_heatmap(
+    image_path: Union[str, Path, Image.Image],
+    blocks: list,
+    probs: np.ndarray,
+    output_path: Union[str, Path, None],
+    threshold: float = 0.5,
+) -> Image.Image:
+    """Render a clean alpha-blended forensic anomaly heatmap overlay."""
+    if isinstance(image_path, (str, Path)):
+        img = Image.open(image_path).convert("RGBA")
+    else:
+        img = image_path.convert("RGBA")
+
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    for b, p in zip(blocks, probs):
+        if p < threshold:
+            continue
+        alpha = int(70 + 160 * min(1.0, (p - threshold) / (1.0 - threshold + 1e-6)))
+        draw.rectangle(
+            [b.col0, b.row0, b.col1 - 1, b.row1 - 1],
+            fill=(239, 68, 68, alpha),        # shadcn Red-500
+            outline=(239, 68, 68, 255),
+        )
+    result = Image.alpha_composite(img, overlay).convert("RGB")
+    if output_path is not None:
+        p = Path(output_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        result.save(p)
+    return result
+
