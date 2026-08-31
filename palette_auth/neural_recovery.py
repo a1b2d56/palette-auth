@@ -140,3 +140,61 @@ else:
         def __init__(self):
             pass
 
+        def predict_numpy(self, x_7ch: np.ndarray) -> np.ndarray:
+            mask = x_7ch[3:4]
+            guide = x_7ch[4:7]
+            canvas = x_7ch[0:3]
+            return (1.0 - mask) * canvas + mask * guide
+
+
+# Compatibility class and alias
+class NeuralRecoveryEngine(GuidedInpaintingNet):
+    def forward(self, x: Any) -> Any:
+        if isinstance(x, np.ndarray):
+            return self.predict_numpy(x)
+        return super().forward(x)
+
+
+_DEFAULT_RECOVERY = None
+
+
+def get_default_recovery_engine() -> NeuralRecoveryEngine:
+    """Return cached default Neural Recovery Engine.
+    
+    If bundled weights exist at palette_auth/models/guided_inpainter.pt,
+    they are loaded automatically; otherwise, the engine initializes with
+    analytical identity-guided weights.
+    """
+    global _DEFAULT_RECOVERY
+    if _DEFAULT_RECOVERY is None:
+        _DEFAULT_RECOVERY = NeuralRecoveryEngine()
+        bundled_weights = Path(__file__).parent / "models" / "guided_inpainter.pt"
+        if HAS_TORCH and bundled_weights.is_file():
+            try:
+                state = torch.load(bundled_weights, map_location="cpu", weights_only=True)
+                _DEFAULT_RECOVERY.load_state_dict(state)
+            except Exception as exc:
+                logger.warning("Failed to load bundled inpainter weights (%s), using calibrated defaults", exc)
+        if HAS_TORCH:
+            _DEFAULT_RECOVERY.eval()
+    return _DEFAULT_RECOVERY
+
+
+# ------------------------------------------------ Fine-Tuning Routine --
+
+def train_inpainter(
+    clean_images: list[np.ndarray],
+    epochs: int = 5,
+    lr: float = 1e-3,
+    patch_size: int = 64,
+    device: str | None = None,
+) -> GuidedInpaintingNet:
+    """Train or fine-tune the Guided Inpainting network on image patches with synthetic hole masks."""
+    if not HAS_TORCH:
+        raise RuntimeError("PyTorch is required to train the neural inpainter.")
+
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    model = GuidedInpaintingNet().to(device)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
