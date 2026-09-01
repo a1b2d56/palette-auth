@@ -198,3 +198,79 @@ def train_inpainter(
 
     model = GuidedInpaintingNet().to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
+    criterion_l1 = nn.L1Loss()
+
+    model.train()
+    for ep in range(epochs):
+        for img in clean_images:
+            h, w = img.shape[:2]
+            if h < patch_size or w < patch_size:
+                continue
+            # Crop random patch
+            ry = np.random.randint(0, h - patch_size + 1)
+            rx = np.random.randint(0, w - patch_size + 1)
+            target = img[ry : ry + patch_size, rx : rx + patch_size].astype(np.float32) / 255.0
+
+            # Generate synthetic block mask
+            mask = np.zeros((patch_size, patch_size), dtype=np.float32)
+            mh, mw = 32, 32
+            my = np.random.randint(8, patch_size - mh - 8 + 1) if patch_size > mh + 16 else 0
+            mx = np.random.randint(8, patch_size - mw - 8 + 1) if patch_size > mw + 16 else 0
+            mask[my : my + mh, mx : mx + mw] = 1.0
+
+            # Generate coarse 2x2 guide prior
+            guide = target.copy()
+            thumb = Image.fromarray((target[my : my + mh, mx : mx + mw] * 255).astype(np.uint8)).resize(
+                (2, 2), Image.Resampling.BOX
+            )
+            up = np.array(thumb.resize((mw, mh), Image.Resampling.BILINEAR), dtype=np.float32) / 255.0
+            guide[my : my + mh, mx : mx + mw] = up
+
+            masked_canvas = target * (1.0 - mask[..., None])
+
+            inp_np = np.concatenate(
+                [
+                    np.transpose(masked_canvas, (2, 0, 1)),
+                    mask[None, ...],
+                    np.transpose(guide, (2, 0, 1)),
+                ],
+                axis=0,
+            )
+
+            x_t = torch.from_numpy(inp_np).unsqueeze(0).float().to(device)
+            target_t = torch.from_numpy(np.transpose(target, (2, 0, 1))).unsqueeze(0).float().to(device)
+
+            optimizer.zero_grad()
+            pred_t = model(x_t)
+            loss = criterion_l1(pred_t, target_t)
+            loss.backward()
+            optimizer.step()
+
+    model.eval()
+    return model.cpu()
+
+
+def _shock_filter(img: np.ndarray, iterations: int = 8, dt: float = 0.2) -> np.ndarray:
+    """Sharpen blurred edge transitions at inflection points using a discrete shock filter."""
+    if not HAS_SCIPY:
+        return img
+    res = img.copy()
+    for _ in range(iterations):
+        lum = np.mean(res, axis=2)
+        lap = ndimage.laplace(lum)
+        gy, gx = np.gradient(lum)
+        grad_mag = np.sqrt(gx**2 + gy**2)
+        step = -np.sign(lap) * grad_mag * dt
+        res = np.clip(res + step[..., None], 0.0, 1.0)
+    return res
+
+
+# ------------------------------------------------ High-Level Recovery API --
+
+def neural_recover_image(
+    image_path_or_pil: Union[str, Path, Image.Image],
+    result: VerificationResult,
+    output_path: Union[str, Path, None] = None,
+    engine: Any | None = None,
+) -> Image.Image:
+    """Reconstruct tampered regions using AI Guided Inpainting with edge and texture recovery.
