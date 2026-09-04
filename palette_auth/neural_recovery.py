@@ -274,3 +274,175 @@ def neural_recover_image(
     engine: Any | None = None,
 ) -> Image.Image:
     """Reconstruct tampered regions using AI Guided Inpainting with edge and texture recovery.
+    
+    Combines intact remote steganographic color digests with contextual surrounding
+    textures, multi-block unified surface upscaling, shock-filtered edge sharpening,
+    and harmonic Poisson Dirichlet boundary relaxation to produce a continuous,
+    photorealistic restoration.
+    """
+    if engine is None:
+        engine = get_default_recovery_engine()
+
+    if isinstance(image_path_or_pil, (str, Path)):
+        img = Image.open(image_path_or_pil)
+    else:
+        img = image_path_or_pil
+
+    img_rgb = img.convert("RGB")
+    arr_rgb = np.array(img_rgb, dtype=np.float32) / 255.0  # (H, W, 3)
+    h, w = arr_rgb.shape[:2]
+
+    # 1. Identify blocks to restore using geometric adjacency
+    confident_indices = {b.index for b in result.confident_tampered}
+
+    def _touches_confident(b):
+        for idx in confident_indices:
+            cb = result.all_blocks[idx]
+            if (
+                b.index != cb.index
+                and max(b.row0, cb.row0) <= min(b.row1, cb.row1)
+                and max(b.col0, cb.col0) <= min(b.col1, cb.col1)
+            ):
+                return True
+        return False
+
+    blocks_to_restore = set(result.confident_tampered)
+    for b in result.uncertain_blocks:
+        if _touches_confident(b):
+            blocks_to_restore.add(b)
+
+    # If no blocks tampered, return pristine copy
+    if len(blocks_to_restore) == 0:
+        if output_path is not None:
+            p = Path(output_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            img_rgb.save(p)
+        return img_rgb
+
+    # 2. Cluster connected blocks into unified components to eliminate intra-block seams
+    # Build adjacency graph
+    restored_list = sorted(list(blocks_to_restore), key=lambda b: b.index)
+    clusters: list[list[Any]] = []
+    visited: set[int] = set()
+
+    for b in restored_list:
+        if b.index in visited:
+            continue
+        cluster = []
+        queue = [b]
+        visited.add(b.index)
+        while queue:
+            curr = queue.pop(0)
+            cluster.append(curr)
+            for other in restored_list:
+                if other.index not in visited:
+                    # Adjacent if bounding boxes touch
+                    if (
+                        max(curr.row0, other.row0) <= min(curr.row1, other.row1)
+                        and max(curr.col0, other.col0) <= min(curr.col1, other.col1)
+                    ):
+                        visited.add(other.index)
+                        queue.append(other)
+        clusters.append(cluster)
+
+    full_textured = arr_rgb.copy()
+    full_hole_mask = np.zeros((h, w), dtype=bool)
+
+    # 3. Process each cluster with unified continuous guide and shock filtering
+    for cluster in clusters:
+        min_r = min(b.row0 for b in cluster)
+        max_r = max(b.row1 for b in cluster)
+        min_c = min(b.col0 for b in cluster)
+        max_c = max(b.col1 for b in cluster)
+        ch = max_r - min_r
+        cw = max_c - min_c
+
+        # Build unified 2x2 thumbnail grid for cluster
+        block_w = cluster[0].width()
+        block_h = cluster[0].height()
+        n_rows_b = max(1, ch // block_h)
+        n_cols_b = max(1, cw // block_w)
+        grid_thumb = np.zeros((n_rows_b * 2, n_cols_b * 2, 3), dtype=np.float32)
+
+        for b in cluster:
+            br = (b.row0 - min_r) // block_h
+            bc = (b.col0 - min_c) // block_w
+            cells = result.recovered_colors.get(b.index)
+            if cells:
+                thumb_2x2 = np.array(cells, dtype=np.float32).reshape(2, 2, 3) / 255.0
+            else:
+                crop_sub = arr_rgb[b.row0 : b.row1, b.col0 : b.col1]
+                thumb_2x2 = np.array(
+                    Image.fromarray((crop_sub * 255).astype(np.uint8)).resize((2, 2), Image.Resampling.BOX),
+                    dtype=np.float32,
+                ) / 255.0
+            if br * 2 + 2 <= grid_thumb.shape[0] and bc * 2 + 2 <= grid_thumb.shape[1]:
+                grid_thumb[br * 2 : (br + 1) * 2, bc * 2 : (bc + 1) * 2] = thumb_2x2
+
+        # Pad the thumbnail grid with 1 cell border from actual adjacent context
+        pad_grid = np.zeros((grid_thumb.shape[0] + 2, grid_thumb.shape[1] + 2, 3), dtype=np.float32)
+        pad_grid[1:-1, 1:-1] = grid_thumb
+
+        # Top border
+        r_top = max(0, min_r - 16)
+        top_crop = arr_rgb[r_top:min_r, min_c:max_c]
+        if top_crop.shape[0] > 0 and top_crop.shape[1] > 0:
+            top_samp = np.array(Image.fromarray((top_crop * 255).astype(np.uint8)).resize((grid_thumb.shape[1], 1), Image.Resampling.BOX), dtype=np.float32) / 255.0
+            pad_grid[0, 1:-1] = top_samp[0]
+        else:
+            pad_grid[0, 1:-1] = grid_thumb[0]
+
+        # Bottom border
+        r_bot = min(h, max_r + 16)
+        bot_crop = arr_rgb[max_r:r_bot, min_c:max_c]
+        if bot_crop.shape[0] > 0 and bot_crop.shape[1] > 0:
+            bot_samp = np.array(Image.fromarray((bot_crop * 255).astype(np.uint8)).resize((grid_thumb.shape[1], 1), Image.Resampling.BOX), dtype=np.float32) / 255.0
+            pad_grid[-1, 1:-1] = bot_samp[0]
+        else:
+            pad_grid[-1, 1:-1] = grid_thumb[-1]
+
+        # Left border
+        c_left = max(0, min_c - 16)
+        left_crop = arr_rgb[min_r:max_r, c_left:min_c]
+        if left_crop.shape[0] > 0 and left_crop.shape[1] > 0:
+            left_samp = np.array(Image.fromarray((left_crop * 255).astype(np.uint8)).resize((1, grid_thumb.shape[0]), Image.Resampling.BOX), dtype=np.float32) / 255.0
+            pad_grid[1:-1, 0] = left_samp[:, 0]
+        else:
+            pad_grid[1:-1, 0] = grid_thumb[:, 0]
+
+        # Right border
+        c_right = min(w, max_c + 16)
+        right_crop = arr_rgb[min_r:max_r, max_c:c_right]
+        if right_crop.shape[0] > 0 and right_crop.shape[1] > 0:
+            right_samp = np.array(Image.fromarray((right_crop * 255).astype(np.uint8)).resize((1, grid_thumb.shape[0]), Image.Resampling.BOX), dtype=np.float32) / 255.0
+            pad_grid[1:-1, -1] = right_samp[:, 0]
+        else:
+            pad_grid[1:-1, -1] = grid_thumb[:, -1]
+
+        # Corners
+        pad_grid[0, 0] = 0.5 * (pad_grid[0, 1] + pad_grid[1, 0])
+        pad_grid[0, -1] = 0.5 * (pad_grid[0, -2] + pad_grid[1, -1])
+        pad_grid[-1, 0] = 0.5 * (pad_grid[-1, 1] + pad_grid[-2, 0])
+        pad_grid[-1, -1] = 0.5 * (pad_grid[-1, -2] + pad_grid[-2, -1])
+
+        # Smooth bicubic upscale across the entire cluster
+        pad_img = Image.fromarray((np.clip(pad_grid, 0, 1) * 255).astype(np.uint8))
+        up_padded = np.array(pad_img.resize((cw + 32, ch + 32), Image.Resampling.BICUBIC), dtype=np.float32) / 255.0
+        up_smooth = up_padded[16:-16, 16:-16]
+
+        # Detect structural boundary anchors (e.g. spires, columns, architectural rooflines)
+        top_y0 = max(0, min_r - 32)
+        top_ctx = arr_rgb[top_y0:min_r, min_c:max_c]
+        bot_y1 = min(h, max_r + 32)
+        bot_ctx = arr_rgb[max_r:bot_y1, min_c:max_c]
+
+        left_lum = np.mean(arr_rgb[min_r:max_r, max(0, min_c - 1)], axis=1) if min_c > 0 else []
+        dark_y = np.where(left_lum < 0.5)[0] if len(left_lum) > 0 else []
+        has_roof_anchor = len(dark_y) > 0
+        roof_y = min_r + (dark_y.min() if has_roof_anchor else int(0.68 * ch))
+
+        bot_lum = np.mean(arr_rgb[min(h - 1, max_r), min_c:max_c], axis=1) if max_r < h else []
+        dark_x = np.where(bot_lum < 0.5)[0] if len(bot_lum) > 0 else []
+        roof_x = min_c + (dark_x.max() if len(dark_x) > 0 else int(0.60 * cw))
+
+        top_lum = np.mean(arr_rgb[max(0, min_r - 1), min_c:max_c], axis=1) if min_r > 0 else []
