@@ -413,3 +413,34 @@ def render_recovery(
         mini_smooth = mini_img.resize((w, h), Image.Resampling.BILINEAR)
         arr[b.row0 : b.row1, b.col0 : b.col1] = np.array(mini_smooth, dtype=np.float32)
 
+    # 2. Inpaint only uncertain blocks that are part of the tamper cluster
+    cluster_uncertain = [
+        b for b in result.uncertain_blocks
+        if _is_adjacent_to_set(b, confident_indices, result.all_blocks)
+    ]
+
+    if cluster_uncertain:
+        uncertain_mask = np.zeros((height, width), dtype=bool)
+        for b in cluster_uncertain:
+            uncertain_mask[b.row0 : b.row1, b.col0 : b.col1] = True
+        try:
+            from scipy.ndimage import gaussian_filter
+            valid_mask = ~uncertain_mask
+            for c in range(3):
+                ch = arr[..., c].copy()
+                ch[uncertain_mask] = 0
+                weight = valid_mask.astype(np.float32)
+                ch_blur = gaussian_filter(ch, sigma=6)
+                weight_blur = gaussian_filter(weight, sigma=6) + 1e-6
+                inpainted = ch_blur / weight_blur
+                arr[uncertain_mask, c] = inpainted[uncertain_mask]
+        except Exception:
+            from PIL import ImageFilter
+            valid_img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGB")
+            blurred = np.array(valid_img.filter(ImageFilter.GaussianBlur(radius=8)), dtype=np.float32)
+            arr[uncertain_mask] = blurred[uncertain_mask]
+
+    out_arr = np.clip(arr, 0, 255).astype(np.uint8)
+    p = Path(output_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(out_arr, "RGB").save(p)
