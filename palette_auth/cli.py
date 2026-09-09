@@ -118,3 +118,8 @@ def main(argv=None) -> int:
             print(f"heatmap -> {args.heatmap}")
         return 0
 
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
