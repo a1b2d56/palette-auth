@@ -93,3 +93,156 @@ pip install palette-auth
 pip install "palette-auth[ai]"
 ```
 *Adds: `torch`, `scipy`.*
+
+### Development Setup
+```bash
+git clone https://github.com/a1b2d56/palette-auth.git
+cd palette-auth
+pip install -e ".[dev,ai]"
+```
+
+---
+
+## Quickstart & Demo
+
+Run the end-to-end interactive demo and view the web verification dashboard:
+
+```bash
+# Run demonstration pipeline
+python demo.py --open
+
+# Or on Windows using the batch launcher:
+run_demo.bat
+```
+
+The demo script automatically:
+1. Loads a test scene and generates an Ed25519 keypair.
+2. Invisibly signs the image in-pixel.
+3. Applies a realistic localized forgery.
+4. Cryptographically verifies both copies and localizes the tampered blocks.
+5. Performs hybrid discrete Poisson self-recovery.
+6. Runs the passive forensic detector.
+7. Generates an interactive verification dashboard (`demo_output/index.html`) with an image comparison slider and 6-stage pipeline composite (`demo_output/comparison.png`).
+
+---
+
+## CLI Usage
+
+### Generate Keys
+```bash
+python -m palette_auth.cli genkey --out signer
+# Output: signer.private.pem and signer.public.pem
+```
+
+### Sign an Image
+```bash
+python -m palette_auth.cli sign photo.png photo_signed.png \
+    --key signer.private.pem \
+    --block-size 32
+```
+
+### Verify and Recover
+```bash
+python -m palette_auth.cli verify photo_signed.png \
+    --key signer.public.pem \
+    --tamper-map tamper_overlay.png \
+    --recover recovered.png \
+    --recover-method neural
+```
+
+### Keyless Forensic Analysis
+```bash
+python -m palette_auth.cli detect suspect.png --heatmap forensic_heatmap.png
+```
+
+---
+
+## Python API
+
+```python
+from palette_auth import generate_keypair, sign_image, verify_image, render_recovery
+from palette_auth.ai_detector import predict_heatmap, render_heatmap
+
+# 1. Key generation
+private_key, public_key = generate_keypair()
+
+# 2. In-pixel signing
+sign_info = sign_image("original.png", "signed.png", private_key, block_size=32)
+print(f"Signed {sign_info['n_blocks']} blocks.")
+
+# 3. Verification & localization
+result = verify_image("signed.png", public_key)
+if result.authentic:
+    print("Image is intact and verified authentic.")
+else:
+    print(f"Tampering detected: {result.tampered_count}/{result.total_blocks} blocks modified.")
+    
+    # Render restored approximation
+    render_recovery("signed.png", result, "recovered.png", method="neural")
+
+# 4. Passive forensic analysis (unkeyed)
+blocks, probabilities = predict_heatmap("suspect.png")
+render_heatmap("suspect.png", blocks, probabilities, "heatmap.png")
+```
+
+---
+
+## Binary Data Specification
+
+### Header Structure (Block 0)
+The primary header occupies 83 bytes (664 bits) within Block 0:
+
+| Offset (Bytes) | Field | Size | Description |
+|---|---|---|---|
+| `0..3` | Magic | 4 | ASCII `'PIAH'` (`Palette Image Auth Header`) |
+| `4` | Version | 1 | Header format version (`0x01`) |
+| `5..6` | Block Size | 2 | Block dimension $B$ in pixels (big-endian `uint16`) |
+| `7..10` | Block Count $N$ | 4 | Total number of partitioned blocks (big-endian `uint32`) |
+| `11..18` | Seed | 8 | PRNG seed for deterministic block mapping (big-endian `int64`) |
+| `19..82` | Signature | 64 | Ed25519 signature over concatenated block hashes |
+
+### Local Block Tag
+Each block has a 20-byte tag embedded into its distant partner block:
+- **Block Content Hash** (8 bytes): Truncated SHA-256 digest bound to block position.
+- **Recovery Prior** (12 bytes): Downsampled $2 \times 2$ RGB grid average ($4 \text{ cells} \times 3 \text{ bytes}$).
+
+---
+
+## Benchmark Results
+
+Evaluated across synthetic benchmark scenes ($256 \times 256$ pixels, block size $= 32 \times 32$):
+
+| Metric | Cryptographic Verification | Passive Dual-Stream SRM Net |
+|---|---|---|
+| **False Positive Rate (Intact)** | **0.00%** | 3.1% |
+| **Localization Precision** | **1.00** | 0.84 |
+| **Localization Recall** | **0.92** | 0.88 |
+| **Localization F1 Score** | **0.96** | 0.86 |
+| **Mean PSNR (Embedding Impact)** | **31.6 dB** | N/A (Passive) |
+
+Run the test and benchmark suites locally:
+```bash
+# Run unit and integration tests (35 tests)
+pytest tests/ -v
+
+# Run adversarial scenarios (copy-move, collateral evidence destruction, single-pixel)
+python attacks.py
+
+# Run quantitative evaluation harness
+python evaluate.py
+```
+
+---
+
+## Security Model & Limitations
+
+- **Fragile Watermark**: Any geometric transform, re-compression, or resizing deliberately breaks the signature. This is intended behavior for digital forensics and integrity verification.
+- **Key Security**: Signing requires the private key; verification requires only the public key.
+- **Adversarial Collateral Destruction**: If an attacker modifies both block $B$ and its partner block $B'$, the system flags the blocks as `uncertain` rather than silently failing.
+- For vulnerability disclosure instructions, see [SECURITY.md](SECURITY.md).
+
+---
+
+## License
+
+Distributed under the MIT License. See [LICENSE](LICENSE) for details.
