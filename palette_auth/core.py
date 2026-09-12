@@ -20,10 +20,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import struct
 from dataclasses import dataclass, field
 from pathlib import Path
-import struct
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -66,9 +66,10 @@ def _load_palette_image(path: str | Path) -> tuple[np.ndarray, np.ndarray]:
         logger.info("Converting %s from %s to palette mode 'P' (256 colors adaptive)", path, img.mode)
         img = img.convert("P", palette=Image.ADAPTIVE, colors=256)
     index_array = np.array(img, dtype=np.uint8).copy()
-    palette_flat = img.getpalette() or []
-    n = max(1, len(palette_flat) // 3)
-    palette = np.array(palette_flat[: n * 3], dtype=np.uint8).reshape(n, 3)
+    palette_flat = list(img.getpalette() or [])
+    if len(palette_flat) < 768:
+        palette_flat.extend([0] * (768 - len(palette_flat)))
+    palette = np.array(palette_flat[:768], dtype=np.uint8).reshape(256, 3)
     return index_array, palette
 
 
@@ -76,8 +77,9 @@ def _save_palette_image(index_array: np.ndarray, palette: np.ndarray, path: str 
     """Save palette image ensuring 768-byte palette padding."""
     out = Image.fromarray(index_array, mode="P")
     pal = palette.flatten().tolist()
-    pal += [0] * (768 - len(pal))
-    out.putpalette(pal)
+    if len(pal) < 768:
+        pal.extend([0] * (768 - len(pal)))
+    out.putpalette(pal[:768])
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     out.save(p)

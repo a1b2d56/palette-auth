@@ -46,7 +46,7 @@ def attack_informed_collateral(signed, pubkey):
     print("\n[Test 2] Targeted evidence destruction attack")
     print("Adversary attempts to corrupt target block and its corresponding evidence block.")
     info = core.inspect(signed)
-    blocks, perm, pair_of, palette = info["blocks"], info["perm"], info["pair_of"], info["palette"]
+    blocks, perm, _pair_of, palette = info["blocks"], info["perm"], info["pair_of"], info["palette"]
 
     target = blocks[50]
     evidence_block = blocks[perm[target.index]]

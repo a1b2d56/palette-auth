@@ -51,6 +51,7 @@ __all__ = [
     "DualStreamForensicNet",
     "TamperCNN",
     "VerificationResult",
+    "__version__",
     "generate_keypair",
     "inspect",
     "load_private_key",
@@ -64,5 +65,4 @@ __all__ = [
     "sign_image",
     "verify",
     "verify_image",
-    "__version__",
 ]

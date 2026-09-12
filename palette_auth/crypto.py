@@ -34,7 +34,7 @@ def save_private_key(
     password: str | bytes | None = None,
 ) -> None:
     """Save an Ed25519 private key to a PEM-encoded file.
-    
+
     If password is provided, the key is encrypted using PKCS#8 BestAvailableEncryption;
     otherwise, it is written unencrypted.
     """
@@ -70,7 +70,7 @@ def load_private_key(
     password: str | bytes | None = None,
 ) -> Ed25519PrivateKey:
     """Load an Ed25519 private key from a PEM-encoded file.
-    
+
     Raises:
         FileNotFoundError: If the file does not exist.
         ValueError: If key format or password is invalid.
@@ -87,7 +87,7 @@ def load_private_key(
 
 def load_public_key(path: str | Path) -> Ed25519PublicKey:
     """Load an Ed25519 public key from a PEM-encoded file.
-    
+
     Raises:
         FileNotFoundError: If the file does not exist.
         ValueError: If key format is invalid.

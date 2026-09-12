@@ -1,7 +1,8 @@
-import pytest
 import numpy as np
 from PIL import Image
+
 from palette_auth import core, crypto
+
 
 def create_sample_palette_image(path, size=(64, 64)):
     arr = np.zeros((size[1], size[0], 3), dtype=np.uint8)
@@ -17,21 +18,21 @@ def test_full_signing_verification_cycle(tmp_path):
     signed = tmp_path / "signed.png"
     tampered = tmp_path / "tampered.png"
     create_sample_palette_image(orig, (64, 64))
-    
+
     priv, pub = crypto.generate_keypair()
     priv_file = tmp_path / "k.priv.pem"
     pub_file = tmp_path / "k.pub.pem"
     crypto.save_private_key(priv, priv_file)
     crypto.save_public_key(pub, pub_file)
-    
+
     info = core.sign_image(orig, signed, priv_file, block_size=32)
     assert info["n_blocks"] == 4
-    
+
     # Verify clean image
     clean_res = core.verify_image(signed, pub_file)
     assert clean_res.authentic is True
     assert len(clean_res.tampered_blocks) == 0
-    
+
     # Tamper block 3 (bottom-right) by changing its palette index
     img = Image.open(signed)
     arr = np.array(img, dtype=np.uint8).copy()

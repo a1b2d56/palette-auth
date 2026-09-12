@@ -1,6 +1,5 @@
-import pytest
-from pathlib import Path
 from palette_auth import crypto
+
 
 def test_keypair_generation():
     priv, pub = crypto.generate_keypair()
@@ -26,10 +25,10 @@ def test_key_serialization(tmp_path):
     pub_file = tmp_path / "k.pub.pem"
     crypto.save_private_key(priv, priv_file)
     crypto.save_public_key(pub, pub_file)
-    
+
     loaded_priv = crypto.load_private_key(priv_file)
     loaded_pub = crypto.load_public_key(pub_file)
-    
+
     msg = b"test payload"
     sig = crypto.sign(loaded_priv, msg)
     assert crypto.verify(loaded_pub, sig, msg) is True

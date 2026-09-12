@@ -24,19 +24,24 @@ def build_pair_map(palette_rgb: np.ndarray) -> dict[int, int]:
         return {}
     diffs = palette_rgb[:, None, :].astype(np.int32) - palette_rgb[None, :, :].astype(np.int32)
     dist2 = (diffs ** 2).sum(axis=2)
-    np.fill_diagonal(dist2, np.iinfo(np.int64).max)
 
-    order = np.dstack(np.unravel_index(np.argsort(dist2, axis=None), dist2.shape))[0]
+    # Upper triangular pairs (i < j)
+    i_idx, j_idx = np.triu_indices(n, k=1)
+    dists = dist2[i_idx, j_idx]
+    # Deterministic sort with tie-breaking: primary=distance, secondary=i, tertiary=j
+    order = np.lexsort((j_idx, i_idx, dists))
+
     unpaired = set(range(n))
     pair_of: dict[int, int] = {}
-    for a, b in order:
-        a, b = int(a), int(b)
+    for idx in order:
+        a = int(i_idx[idx])
+        b = int(j_idx[idx])
         if a in unpaired and b in unpaired:
             pair_of[a] = b
             pair_of[b] = a
             unpaired.discard(a)
             unpaired.discard(b)
-        if not unpaired:
+        if len(unpaired) < 2:
             break
     return pair_of
 
@@ -108,6 +113,6 @@ def extract_bits_from_block(
     for r, c in positions[start_slot:end]:
         idx = int(index_block[r, c])
         partner = pair_of[idx]
-        lo, hi = (idx, partner) if idx < partner else (partner, idx)
+        _, hi = (idx, partner) if idx < partner else (partner, idx)
         bits.append(1 if idx == hi else 0)
     return bits

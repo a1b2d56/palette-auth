@@ -15,15 +15,14 @@ from __future__ import annotations
 import io
 import logging
 from pathlib import Path
-from typing import Any, List, Tuple, Union
+from typing import Any, Union
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 
 try:
     import torch
-    import torch.nn as nn
-    import torch.optim as optim
+    from torch import nn, optim
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
@@ -40,7 +39,7 @@ PATCH: int = 32
 
 def get_srm_filters() -> np.ndarray:
     """Standard Spatial Rich Model (SRM) high-pass residual filter bank (30 kernels).
-    
+
     Includes 1st-order differences, 2nd-order (SPAM) derivatives, 3x3 Laplacians,
     and corner/edge filters designed for steganalysis and manipulation localization.
     """
@@ -85,7 +84,7 @@ def compute_ela(
     scale: float = 20.0,
 ) -> np.ndarray:
     """Compute Error Level Analysis (ELA) difference map.
-    
+
     Re-compresses the image to JPEG at the specified quality factor and computes
     the amplified absolute pixel error. Tampered areas with differing compression
     histories show elevated residual error.
@@ -125,7 +124,6 @@ def compute_noise_inconsistency(
     arr = np.array(img, dtype=np.float32) / 255.0
     h, w = arr.shape
     # 3x3 Laplacian residual
-    lap = np.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]], dtype=np.float32)
     pad = np.pad(arr, 1, mode="reflect")
     res = (
         pad[1 : h + 1, 1 : w + 1] * 4.0
@@ -176,7 +174,7 @@ if HAS_TORCH:
 
     class DualStreamForensicNet(nn.Module):
         """Dual-Stream Forensic Neural Network.
-        
+
         Stream 1: Fixed 30-filter SRM High-Pass Residual Bank + 2 Residual Blocks
         Stream 2: RGB Spatial Texture Feature Extractor + Residual Block
         Fusion: Concatenation -> 1x1 Bottleneck -> Global Pooling -> Sigmoid
@@ -266,7 +264,7 @@ _DEFAULT_ENGINE = None
 
 def get_default_forensic_engine() -> DualStreamForensicNet:
     """Return a cached default forensic detector instance.
-    
+
     If bundled weights exist at palette_auth/models/forensic_detector.pt,
     they are loaded automatically; otherwise, the engine initializes with
     calibrated analytical SRM filters.
@@ -295,7 +293,7 @@ def generate_synthetic_dataset(
     seed: int = 42,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Generate synthetic patches for training: Authentic (0) vs Tampered (1).
-    
+
     - Class 0 (Authentic): smooth gradients, continuous textures, authentic sensor noise.
     - Class 1 (Tampered): edge splicing, local boundary mismatch, inpainting blur, noise disparity.
     """
@@ -447,7 +445,7 @@ def predict_heatmap(
     fuse_ela: bool = True,
 ) -> tuple[list, np.ndarray]:
     """Runs forensic analysis block-by-block over an image.
-    
+
     Combines the Dual-Stream CNN output with Error Level Analysis (ELA) and
     local noise variance inconsistency for reliable keyless tamper localization.
     """

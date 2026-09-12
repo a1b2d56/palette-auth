@@ -1,9 +1,10 @@
-import pytest
 import numpy as np
 from PIL import Image
+
+from palette_auth import ai_detector, neural_recovery
 from palette_auth.blocks import BlockCoords
 from palette_auth.core import VerificationResult
-from palette_auth import neural_recovery, ai_detector
+
 
 def test_neural_recovery_engine_forward():
     engine = neural_recovery.NeuralRecoveryEngine()

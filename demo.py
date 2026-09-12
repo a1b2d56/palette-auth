@@ -122,11 +122,11 @@ def generate_html_dashboard(
     n_tampered = len(result.tampered_blocks) if result else 12
     n_confident = len(result.confident_tampered) if result else 8
     n_uncertain = len(result.uncertain_blocks) if result else 4
-    
+
     stats = stats or {}
     block_size = stats.get("block_size", 32)
     ai_flagged = stats.get("ai_flagged", 10)
-    timing_sign = stats.get("timing_sign", "45 ms")
+    stats.get("timing_sign", "45 ms")
     timing_verify = stats.get("timing_verify", "20 ms")
     timing_ai_recovery = stats.get("timing_ai_recovery", "60 ms")
     timing_ai_detect = stats.get("timing_ai_detect", "25 ms")
@@ -385,7 +385,7 @@ def generate_html_dashboard(
                     <div class="max-w-2xl mx-auto comparison-slider border border-border shadow-2xl" id="slider-box">
                         <!-- Bottom Image: Restored -->
                         <img src="recovered_neural.png" alt="AI Neural Restored image output" class="w-full" id="slider-bottom-img">
-                        
+
                         <!-- Top Image: Clipped -->
                         <div class="slider-overlay" id="slider-overlay">
                             <img src="tampered.png" alt="Tampered forged image output" class="max-w-none w-full" id="slider-top-img">
@@ -746,7 +746,7 @@ def main(argv=None, open_browser: bool = False) -> None:
     print(f"      Confident restorations: {len(r2.confident_tampered)} blocks")
 
     core.render_tamper_map(tampered, r2, OUT / "tamper_map_tampered.png")
-    
+
     # 1. Classical Bilinear Recovery
     core.render_recovery(tampered, r2, OUT / "recovered_bilinear.png", method="bilinear")
     # 2. AI Neural Recovery

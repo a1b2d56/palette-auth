@@ -15,15 +15,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Tuple, Union
+from typing import TYPE_CHECKING, Any, Union
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image
 
 try:
     import torch
-    import torch.nn as nn
-    import torch.optim as optim
+    from torch import nn, optim
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
@@ -46,7 +45,7 @@ logger = logging.getLogger(__name__)
 if HAS_TORCH:
     class GatedConv2d(nn.Module):
         """Gated Convolution layer for deep inpainting.
-        
+
         Learns dynamic feature gating: output = Act(FeatureConv(x)) * Sigmoid(GatingConv(x)).
         """
         def __init__(self, in_channels: int, out_channels: int, kernel_size: int = 3, stride: int = 1, padding: int = 1, dilation: int = 1):
@@ -73,7 +72,7 @@ if HAS_TORCH:
 
     class GuidedInpaintingNet(nn.Module):
         """Deep Gated Convolutional Inpainting & Prior Fusion Network.
-        
+
         Input: 7 channels
           - Masked RGB (3 channels)
           - Binary Tamper Mask (1 channel)
@@ -84,12 +83,12 @@ if HAS_TORCH:
             super().__init__()
             # 1. Gated Feature Projection (7 -> 32)
             self.proj = GatedConv2d(7, 32, kernel_size=3, padding=1)
-            
+
             # 2. Multi-scale Dilated Bottleneck (Receptive fields 3, 5, 9)
             self.d1 = DilatedGatedBlock(32, dilation=1)
             self.d2 = DilatedGatedBlock(32, dilation=2)
             self.d4 = DilatedGatedBlock(32, dilation=4)
-            
+
             # 3. Refinement & Skip Fusion (32 + 7 -> 3)
             self.refine = nn.Sequential(
                 nn.Conv2d(32 + 7, 32, kernel_size=3, padding=1),
@@ -160,7 +159,7 @@ _DEFAULT_RECOVERY = None
 
 def get_default_recovery_engine() -> NeuralRecoveryEngine:
     """Return cached default Neural Recovery Engine.
-    
+
     If bundled weights exist at palette_auth/models/guided_inpainter.pt,
     they are loaded automatically; otherwise, the engine initializes with
     analytical identity-guided weights.
@@ -274,7 +273,7 @@ def neural_recover_image(
     engine: Any | None = None,
 ) -> Image.Image:
     """Reconstruct tampered regions using AI Guided Inpainting with edge and texture recovery.
-    
+
     Combines intact remote steganographic color digests with contextual surrounding
     textures, multi-block unified surface upscaling, shock-filtered edge sharpening,
     and harmonic Poisson Dirichlet boundary relaxation to produce a continuous,

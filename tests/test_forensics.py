@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+
 import numpy as np
 import pytest
-from PIL import Image
 
 try:
     import torch
@@ -57,10 +57,10 @@ def test_synthetic_training_and_serialization(tmp_path: Path):
     model, history = ai_detector.train(n_per_class=10, epochs=1, batch_size=4)
     assert model is not None
     assert "train_loss" in history
-    
+
     ai_detector.save_model(model, model_path)
     assert model_path.exists()
-    
+
     loaded_model = ai_detector.load_model(model_path)
     assert isinstance(loaded_model, ai_detector.DualStreamForensicNet)
 

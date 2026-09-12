@@ -101,7 +101,7 @@ def main(argv=None) -> int:
         from . import ai_detector
 
         print(f"Training forensic detector ({args.n_per_class} per class, {args.epochs} epochs)...")
-        model, hist = ai_detector.train(n_per_class=args.n_per_class, epochs=args.epochs, lr=args.lr)
+        model, _ = ai_detector.train(n_per_class=args.n_per_class, epochs=args.epochs, lr=args.lr)
         ai_detector.save_model(model, args.out)
         print(f"detector weights saved -> {args.out}")
         return 0
